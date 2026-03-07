@@ -20,13 +20,20 @@ void generate(int max,int nb,char *s) {
     int i;
     for (i=0;i<max_graph;i++)
       if (strcmp(acc[i],enc)==0) {
-	printf("%s is similar to another graph\n",s);
+	//	printf("%s is similar to another graph\n",s);
 	break;
       }
     if (i==max_graph) {
+      char forest[1000];
+      res_hydra res;
+      forest[0]=0;
       acc[max_graph++]=enc;
-      int64_t res=hydra(root);
-      printf("%s solved in %ld\n",s,res);
+      tree_to_forest(root,forest);
+      hydra(root,&res);
+      if (res.success)
+	printf("%s solved in %ld\n",forest,res.step);
+      else
+	printf("%s could not be solved in %ld\n",forest,res.step);
     }
     free_tree(root);
     return;
@@ -45,6 +52,6 @@ void generate(int max,int nb,char *s) {
 int main() {
   char s[2000];
   s[0]=0;
-  generate(1,5,s);
+  generate(1,3,s);
   return 0;
 }

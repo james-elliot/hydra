@@ -4,9 +4,9 @@
 #include <string.h>
 
 #include "hydra.h"
-//#define DEBUG
+
 #define MAX_NODES 1000000000L
-static int64_t nbc,nbd;
+static int64_t nbc,nbd,step,max_nodes;
 
 void print_node(node *n) {
   printf("nb=%4lu adr=%14p dist=%4d parent=%14p next=%14p first=%14p shortest=%14p\n",
@@ -18,6 +18,17 @@ void print_tree(node *n) {
   while (n!=NULL) {
     print_node(n);
     print_tree(n->first_child);
+    n=n->next;
+  }
+}
+
+void tree_to_forest(node *n,char *s) {
+  char tmp[10];
+  while (n!=NULL) {
+    sprintf(tmp,"[%ld",n->nb);
+    strcat(s,tmp);
+    tree_to_forest(n->first_child,s);
+    strcat(s,"]");
     n=n->next;
   }
 }
@@ -138,41 +149,12 @@ node *add_node(node *n) {
 }
 
 node *copy_subtree(node *src,node *dest) {
-#ifdef DEBUG
-  if (src!=NULL) {
-    printf("Copying subtree from %ld to %ld\n", src->nb,dest->nb);
-    fflush(stdout);
-  }
-#endif
   while (src!=NULL) {
     if (add_node(dest)==NULL) return NULL;
     if (copy_subtree(src->first_child,dest->first_child)==NULL) return NULL;
     src=src->next;
   }
   return dest;
-}
-
-bool cut_node(node *n, int64_t s) {
-  //pas de parent => on est à la racine, c'est terminé
-  if (n->parent==NULL) return true;
-  node *parent=n->parent;
-#ifdef DEBUG
-  printf("deleting %p\n",n);
-#endif
-  del_node(n);
-  node *gp=parent->parent;
-  // Si le grand père n'existe pas, il n' y a rien à copier
-  if (gp==NULL)  return false;
-  // Sinon il faut copier s fois le sous arbre parent dans le grand parent
-  for (int64_t i=0;i<s;i++) {
-#ifdef DEBUG
-    printf("adding node to node %ld\n",gp->nb);
-    fflush(stdout);
-#endif
-    if (add_node(gp)==NULL) return true;
-    if (copy_subtree(parent->first_child,gp->first_child)==NULL) return true;
-  }
-  return false;
 }
 
 node *find_best_leaf(node *n) {
@@ -182,9 +164,29 @@ node *find_best_leaf(node *n) {
   return n;
 }
 
+bool cut_node(node *root, int64_t s) {
+  node *n=find_best_leaf(root);
+  //pas de parent => on est à la racine, c'est terminé
+  if (n->parent==NULL) return true;
+  node *parent=n->parent;
+  del_node(n);
+  node *gp=parent->parent;
+  // Si le grand père n'existe pas, il n' y a rien à copier
+  if (gp==NULL)  return false;
+  // Sinon il faut copier s fois le sous arbre parent dans le grand parent
+  for (int64_t i=0;i<s;i++) {
+    // Echec de add_node (too many nodes). On renvoie true
+    if (add_node(gp)==NULL) return true;
+    if (copy_subtree(parent->first_child,gp->first_child)==NULL) return true;
+  }
+  return false;
+}
+
 node *build_tree(char *orig) {
   node *root;
   nbc=1;nbd=0;
+  step=1;
+  max_nodes=0;
   root=(node *)malloc(sizeof(node));
   root->parent=NULL;
   root->first_child=NULL;
@@ -193,7 +195,6 @@ node *build_tree(char *orig) {
   root->dist=0;
   root->shortest=NULL;
   root->nb=nbc;
-
   char *s = malloc(strlen(orig)+1);
   strcpy(s,orig);
   while (true) {
@@ -205,18 +206,13 @@ node *build_tree(char *orig) {
       printf("Node %d not  found\n",i);
       exit(0);
     }
-#ifdef DEBUG
-    printf("Adding to node %d\n",i);
-#endif
     add_node(n);
-    //    print_tree(root);
   }
   free(s);
   return root;
 }
 
 int compare_strings(const void* a, const void* b) {
-    // a et b sont des pointeurs vers les éléments du tableau (qui sont eux-mêmes des char*)
     return strcmp(*(const char**)a, *(const char**)b);
 }
 
@@ -228,7 +224,7 @@ char *encode(node *n) {
     curr=curr->next;
   }
   if (num_children==0) {
-    char* leaf_str = (char*)malloc(3 * sizeof(char)); // Alloue pour "()" + caractère nul '\0'
+    char* leaf_str = (char*)malloc(3 * sizeof(char)); 
     strcpy(leaf_str, "()");
     return leaf_str;
   }
@@ -236,72 +232,34 @@ char *encode(node *n) {
   int total_length = 0;
   curr=n->first_child;
   for (int i = 0; i < num_children; i++) {
-        children_encodings[i] = encode(curr);
-	curr=curr->next;
-        total_length += strlen(children_encodings[i]);
-    }
+    children_encodings[i] = encode(curr);
+    curr=curr->next;
+    total_length += strlen(children_encodings[i]);
+  }
   qsort(children_encodings, num_children, sizeof(char*), compare_strings);
-    // Préparer la chaîne du parent : "(" + toutes les sous-chaînes + ")" + '\0'
-    char* parent_str = (char*)malloc((total_length + 3) * sizeof(char));
-    strcpy(parent_str, "(");
-    // Concaténer les enfants triés
-    for (int i = 0; i < num_children; i++) {
-        strcat(parent_str, children_encodings[i]);
-        free(children_encodings[i]); // Libérer la mémoire de l'enfant au fur et à mesure
-    }
-    strcat(parent_str, ")");
-    // Nettoyer le tableau intermédiaire
-    free(children_encodings); 
-    return parent_str;
+  char* parent_str = (char*)malloc((total_length + 3) * sizeof(char));
+  strcpy(parent_str, "(");
+  for (int i = 0; i < num_children; i++) {
+    strcat(parent_str, children_encodings[i]);
+    free(children_encodings[i]); 
+  }
+  strcat(parent_str, ")");
+  free(children_encodings); 
+  return parent_str;
 }
 
-
-int64_t hydra(node *root) {
-
-  // 4 nodes, 38 steps, 20 nodes
-  //  build_tree("1,2,3");
-
-  // 4 nodes, 6 steps, 4 nodes
-  //  build_tree("1,2,1");
-
-  //4  nodes, 4 steps
-  //    build_tree("1,1,1");
-
-  // 5 nodes , out of memory
-  //  build_tree("1,2,3,1");
-
-  //5 nodes, out of memory
-
-  //5 nodes, 38 steps, 20 nodes
-  //  build_tree("1,1,2,2");
-
-#ifdef DEBUG
-  print_tree(root);
-#endif
-  int64_t  s=1;
-  int64_t max_nodes=0;
+void hydra(node *root,res_hydra *res) {
   while (true)  {
-    node *leaf = find_best_leaf(root);
-#ifdef DEBUG
-    printf("found leaf %p\n",leaf);
-#endif
-    if (cut_node(leaf,s)) {
-#ifdef DEBUG
-      printf("Finished in %ld steps, nodes=%ld, max_nodes=%ld, max_generated=%ld\n",s,nbc-nbd,max_nodes,nbc);
-#endif
-       if ((nbc-nbd)>MAX_NODES) return -s;
-      else return s;
+    if (cut_node(root,step)) {
+      res->nb_created=nbc;
+      res->nb_deleted=nbd;
+      res->max_nodes=max_nodes;
+      res->step=step;
+      if ((nbc-nbd)>MAX_NODES) res->success=false;
+      else res->success=true;
+      return;
     }
     if ((nbc-nbd)>max_nodes) max_nodes=nbc-nbd;
-#ifdef DEBUG
-    printf("s=%ld nb_nodes=%ld\n",s,nbc-nbd);
-    print_tree(root);
-#endif
-    s++;
-#ifdef DEBUG
-    if ((s%1000000)==0) printf("Steps=%ld, nodes=%ld, max_nodes=%ld\n",s,nbc-nbd,max_nodes);
-#endif
+    step++;
   }
 }
-
-

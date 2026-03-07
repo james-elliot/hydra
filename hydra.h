@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <stdbool.h>
 
 typedef struct _node node;
 struct _node {
@@ -11,8 +12,17 @@ struct _node {
   node *shortest;
 };
 
+typedef struct _res_hydra res_hydra;
+struct _res_hydra {
+  int64_t nb_created;
+  int64_t nb_deleted;
+  int64_t max_nodes;
+  int64_t step;
+  bool success;
+};
+
 // Solves the hydra. Returns the number of steps. If the number is negative, the function had an OUT_OF_MEMORY
-int64_t hydra(node *root);
+void hydra(node *root,res_hydra *res);
 
 // Returns Aho Hopcroft Ullman encoding for the graph. Helps for finding isomorphic graphs
 char *encode(node *root);
@@ -26,3 +36,6 @@ void  free_tree(node *root);
 // "1,1,1,1,2,3,4,5" means that we create first 4 nodes below the root (nodes 2,3,4,5) and then we attach to each of this node another node
 // Nodes are always numbered by the order of their creation
 node *build_tree(char *orig) ;
+
+void print_tree(node *n);
+void tree_to_forest(node *n,char *s);
