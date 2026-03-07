@@ -14,7 +14,7 @@ void generate(int max,int nb,char *s) {
   if (nb==0) {
     s[len-1]=0;
     //    printf("%s\n",s);
-    node *root=build_tree(s);
+    node *root=build_tree(s,0);
     char *enc = encode(root);
     //    printf("%s\n",enc);
     int i;
@@ -35,7 +35,6 @@ void generate(int max,int nb,char *s) {
       else
 	printf("%s could not be solved in %ld\n",forest,res.step);
     }
-    free_tree(root);
     return;
   }
   char si[100];

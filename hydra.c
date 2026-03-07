@@ -2,11 +2,33 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/sysinfo.h>
 
 #include "hydra.h"
 
-#define MAX_NODES 1000000000L
-static int64_t nbc,nbd,step,max_nodes;
+struct _node {
+  node *parent;
+  node *first_child;
+  node *prev;
+  node *next;
+  uint16_t dist;
+  int64_t nb;
+  node *shortest;
+};
+
+#define max(a,b) \
+   ({ __typeof__ (a) _a = (a); \
+       __typeof__ (b) _b = (b); \
+     _a > _b ? _a : _b; })
+
+#define min(a,b) \
+   ({ __typeof__ (a) _a = (a); \
+       __typeof__ (b) _b = (b); \
+     _a < _b ? _a : _b; })
+
+
+
+static int64_t nbc,nbd,step,max_nodes,max_possible_nodes;
 
 void print_node(node *n) {
   printf("nb=%4lu adr=%14p dist=%4d parent=%14p next=%14p first=%14p shortest=%14p\n",
@@ -127,9 +149,9 @@ void update_add(node *n) {
 }
 
 node *add_node(node *n) {
-  if ((nbc-nbd)>MAX_NODES) {
+  if ((nbc-nbd)>max_possible_nodes) {
 #ifdef DEBUG
-    printf("More than %ld nodes\n",MAX_NODES);
+    printf("More than %ld nodes\n",max_possible_nodes);
 #endif
     return NULL;
   }
@@ -182,11 +204,16 @@ bool cut_node(node *root, int64_t s) {
   return false;
 }
 
-node *build_tree(char *orig) {
+node *build_tree(char *orig,int64_t max_search) {
   node *root;
+  struct sysinfo sinf;
   nbc=1;nbd=0;
   step=1;
   max_nodes=0;
+  sysinfo(&sinf);
+  int64_t max_mem = (int64_t)sinf.mem_unit* (int64_t)sinf.totalram;
+  max_possible_nodes = (max_mem-1000000000L)/sizeof(node);
+  if (max_search!=0) max_possible_nodes=min(max_search,max_possible_nodes);
   root=(node *)malloc(sizeof(node));
   root->parent=NULL;
   root->first_child=NULL;
@@ -248,6 +275,24 @@ char *encode(node *n) {
   return parent_str;
 }
 
+bool one_step(node *root,res_hydra *res) {
+  bool result = cut_node(root,step);
+  if ((nbc-nbd)>max_nodes) max_nodes=nbc-nbd;
+  res->nb_created=nbc;
+  res->nb_deleted=nbd;
+  res->max_nodes=max_nodes;
+  res->step=step;
+  if (result) {
+    if ((nbc-nbd)>max_possible_nodes) res->success=false;
+    else res->success=true;
+    free_tree(root);
+    root=NULL;
+    return true;
+  }
+  step++;
+  return false;
+}
+
 void hydra(node *root,res_hydra *res) {
   while (true)  {
     if (cut_node(root,step)) {
@@ -255,8 +300,10 @@ void hydra(node *root,res_hydra *res) {
       res->nb_deleted=nbd;
       res->max_nodes=max_nodes;
       res->step=step;
-      if ((nbc-nbd)>MAX_NODES) res->success=false;
+      if ((nbc-nbd)>max_possible_nodes) res->success=false;
       else res->success=true;
+      free_tree(root);
+      root=NULL;
       return;
     }
     if ((nbc-nbd)>max_nodes) max_nodes=nbc-nbd;
