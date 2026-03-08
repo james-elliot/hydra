@@ -6,6 +6,7 @@
 
 #include "hydra.h"
 
+typedef struct _node node;
 struct _node {
   node *parent;
   node *first_child;
@@ -15,6 +16,35 @@ struct _node {
   int64_t nb;
   node *shortest;
 };
+
+struct _state_hydra {
+  node *root;
+  int64_t nodes_limit;
+  int64_t nb_created; // number of nodes created
+  int64_t nb_deleted; // number of nodes deleted
+  int64_t max_nodes;  // maximal number of nodes reached
+  int64_t step;       // number of steps
+  hydra_status status;       
+};
+
+int64_t get_nodes_limit(state_hydra *s) {
+  return s->nodes_limit;
+}
+int64_t get_nb_created(state_hydra *s) {
+  return s->nb_created;
+}
+int64_t get_nb_deleted(state_hydra *s) {
+  return s->nb_deleted;
+}
+int64_t get_max_nodes(state_hydra *s) {
+  return s->max_nodes;
+}
+int64_t get_steps(state_hydra *s) {
+  return s->step;
+}
+hydra_status get_status(state_hydra *s) {
+  return s->status;
+}
 
 #define max(a,b) \
    ({ __typeof__ (a) _a = (a); \
@@ -28,31 +58,39 @@ struct _node {
 
 
 
-static int64_t nbc,nbd,step,max_nodes,max_possible_nodes;
-
 void print_node(node *n) {
   printf("nb=%4lu adr=%14p dist=%4d parent=%14p next=%14p first=%14p shortest=%14p\n",
 	 n->nb,n,n->dist,n->parent,n->next,n->first_child,n->shortest);
   fflush(stdout);
 }
 
-void print_tree(node *n) {
+void print_nodes(node *n) {
   while (n!=NULL) {
     print_node(n);
-    print_tree(n->first_child);
+    print_nodes(n->first_child);
     n=n->next;
   }
 }
 
-void tree_to_forest(node *n,char *s) {
+void print_hydra(state_hydra *s) {
+  printf("nodes_limit=%ld nb_created=%ld nb_deleted=%ld max_nodes=%ld steps=%ld\n",
+	 s->nodes_limit,s->nb_created,s->nb_deleted,s->max_nodes,s->step);
+  print_nodes(s->root);
+}
+
+void nodes_to_forest(node *n,char *s) {
   char tmp[10];
   while (n!=NULL) {
     sprintf(tmp,"[%ld",n->nb);
     strcat(s,tmp);
-    tree_to_forest(n->first_child,s);
+    nodes_to_forest(n->first_child,s);
     strcat(s,"]");
     n=n->next;
   }
+}
+
+void hydra_to_forest(state_hydra *state, char *s) {
+  nodes_to_forest(state->root,s);
 }
 
 node *find_node(node *n,int64_t nb) {
@@ -65,14 +103,19 @@ node *find_node(node *n,int64_t nb) {
   return NULL;
 }
 
-void free_tree(node *n) {
+void free_nodes(node *n) {
   node *curr=n->first_child;
   while (curr!=NULL) {
     node *next=curr->next;
-    free_tree(curr);
+    free_nodes(curr);
     curr=next;
   }
   free(n);
+}
+
+void free_hydra(state_hydra *s) {
+  free_nodes(s->root);
+  free(s);
 }
 
 void update_del(node *n,bool alive) {
@@ -118,14 +161,14 @@ void update_del(node *n,bool alive) {
   if (old_d!=p->dist) update_del(p,true);
 }
 
-void del_node(node *n) {
+void del_node(node *n,state_hydra *state) {
   node *p = n->parent;
   if (n->prev==NULL) p->first_child = n->next;
   else n->prev->next=n->next;
   if (n->next!=NULL) n->next->prev=n->prev;
   update_del(n,false);
   free(n);
-  nbd++;
+  state->nb_deleted++;
 }
 
 void update_add(node *n) {
@@ -148,15 +191,15 @@ void update_add(node *n) {
   if (p->dist!=old_d) update_add(p);
 }
 
-node *add_node(node *n) {
-  if ((nbc-nbd)>max_possible_nodes) {
+node *add_node(node *n,state_hydra *state) {
+  if ((state->nb_created-state->nb_deleted)>state->nodes_limit) {
 #ifdef DEBUG
-    printf("More than %ld nodes\n",max_possible_nodes);
+    printf("More than %ld nodes\n",state->nodes_limit);
 #endif
     return NULL;
   }
   node *new_node = (node *)malloc(sizeof(node));
-  new_node->nb=++nbc;
+  new_node->nb=++state->nb_created;
   new_node->prev=NULL;
   new_node->next=n->first_child;
   new_node->parent=n;
@@ -170,10 +213,10 @@ node *add_node(node *n) {
   return new_node;
 }
 
-node *copy_subtree(node *src,node *dest) {
+node *copy_subtree(node *src,node *dest,state_hydra *state) {
   while (src!=NULL) {
-    if (add_node(dest)==NULL) return NULL;
-    if (copy_subtree(src->first_child,dest->first_child)==NULL) return NULL;
+    if (add_node(dest,state)==NULL) return NULL;
+    if (copy_subtree(src->first_child,dest->first_child,state)==NULL) return NULL;
     src=src->next;
   }
   return dest;
@@ -186,64 +229,66 @@ node *find_best_leaf(node *n) {
   return n;
 }
 
-bool cut_node(node *root, int64_t s) {
-  node *n=find_best_leaf(root);
+bool cut_node(state_hydra *state) {
+  node *n=find_best_leaf(state->root);
   //pas de parent => on est à la racine, c'est terminé
   if (n->parent==NULL) return true;
   node *parent=n->parent;
-  del_node(n);
+  del_node(n,state);
   node *gp=parent->parent;
   // Si le grand père n'existe pas, il n' y a rien à copier
   if (gp==NULL)  return false;
   // Sinon il faut copier s fois le sous arbre parent dans le grand parent
-  for (int64_t i=0;i<s;i++) {
+  for (int64_t i=0;i<state->step;i++) {
     // Echec de add_node (too many nodes). On renvoie true
-    if (add_node(gp)==NULL) return true;
-    if (copy_subtree(parent->first_child,gp->first_child)==NULL) return true;
+    if (add_node(gp,state)==NULL) return true;
+    if (copy_subtree(parent->first_child,gp->first_child,state)==NULL) return true;
   }
   return false;
 }
 
-node *build_tree(char *orig,int64_t max_search) {
-  node *root;
+state_hydra *build_hydra(char *orig,int64_t max_search) {
+  state_hydra *state=(state_hydra *)malloc(sizeof(state_hydra));
   struct sysinfo sinf;
-  nbc=1;nbd=0;
-  step=1;
-  max_nodes=0;
+  state->nb_created=1;
+  state->nb_deleted=0;
+  state->step=1;
+  state->max_nodes=0;
+  state->status=RUNNING;
   sysinfo(&sinf);
   int64_t max_mem = (int64_t)sinf.mem_unit* (int64_t)sinf.totalram;
-  max_possible_nodes = (max_mem-1000000000L)/sizeof(node);
-  if (max_search!=0) max_possible_nodes=min(max_search,max_possible_nodes);
-  root=(node *)malloc(sizeof(node));
-  root->parent=NULL;
-  root->first_child=NULL;
-  root->prev=NULL;
-  root->next=NULL;
-  root->dist=0;
-  root->shortest=NULL;
-  root->nb=nbc;
+  state->nodes_limit = (max_mem-1000000000L)/sizeof(node);
+  if (max_search!=0) state->nodes_limit=min(max_search,state->nodes_limit);
+  state->root=(node *)malloc(sizeof(node));
+  state->root->parent=NULL;
+  state->root->first_child=NULL;
+  state->root->prev=NULL;
+  state->root->next=NULL;
+  state->root->dist=0;
+  state->root->shortest=NULL;
+  state->root->nb=state->nb_created;
   char *s = malloc(strlen(orig)+1);
   strcpy(s,orig);
   while (true) {
     char *ns = strsep(&s,",");
     if (ns==NULL) break;
     int i = atoi(ns);
-    node *n=find_node(root,i);
+    node *n=find_node(state->root,i);
     if (n==NULL) {
       printf("Node %d not  found\n",i);
       exit(0);
     }
-    add_node(n);
+    add_node(n,state);
   }
   free(s);
-  return root;
+  return state;
 }
 
 int compare_strings(const void* a, const void* b) {
     return strcmp(*(const char**)a, *(const char**)b);
 }
 
-char *encode(node *n) {
+char *encode_nodes(node *n) {
   int num_children=0;
   node *curr=n->first_child;
   while (curr!=NULL) {
@@ -259,7 +304,7 @@ char *encode(node *n) {
   int total_length = 0;
   curr=n->first_child;
   for (int i = 0; i < num_children; i++) {
-    children_encodings[i] = encode(curr);
+    children_encodings[i] = encode_nodes(curr);
     curr=curr->next;
     total_length += strlen(children_encodings[i]);
   }
@@ -275,38 +320,30 @@ char *encode(node *n) {
   return parent_str;
 }
 
-bool one_step(node *root,res_hydra *res) {
-  bool result = cut_node(root,step);
-  if ((nbc-nbd)>max_nodes) max_nodes=nbc-nbd;
-  res->nb_created=nbc;
-  res->nb_deleted=nbd;
-  res->max_nodes=max_nodes;
-  res->step=step;
+char *encode_hydra(state_hydra *state) {
+  return encode_nodes(state->root);
+}
+
+bool one_step(state_hydra *state) {
+  bool result = cut_node(state);
+  if ((state->nb_created-state->nb_deleted)>state->max_nodes) state->max_nodes=state->nb_created-state->nb_deleted;
   if (result) {
-    if ((nbc-nbd)>max_possible_nodes) res->success=false;
-    else res->success=true;
-    free_tree(root);
-    root=NULL;
+    if ((state->nb_created-state->nb_deleted)>state->nodes_limit) state->status=FAILURE;
+    else state->status=SUCCESS;
     return true;
   }
-  step++;
+  state->step++;
   return false;
 }
 
-void hydra(node *root,res_hydra *res) {
+void hydra(state_hydra *state) {
   while (true)  {
-    if (cut_node(root,step)) {
-      res->nb_created=nbc;
-      res->nb_deleted=nbd;
-      res->max_nodes=max_nodes;
-      res->step=step;
-      if ((nbc-nbd)>max_possible_nodes) res->success=false;
-      else res->success=true;
-      free_tree(root);
-      root=NULL;
+    if (cut_node(state)) {
+      if ((state->nb_created-state->nb_deleted)>state->nodes_limit) state->status=FAILURE;
+      else state->status=SUCCESS;;
       return;
     }
-    if ((nbc-nbd)>max_nodes) max_nodes=nbc-nbd;
-    step++;
+    if ((state->nb_created-state->nb_deleted)>state->max_nodes) state->max_nodes=state->nb_created-state->nb_deleted;
+    state->step++;
   }
 }

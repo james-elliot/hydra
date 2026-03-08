@@ -1,6 +1,7 @@
 #include "hydra.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 #define max(a,b) \
    ({ __typeof__ (a) _a = (a); \
@@ -14,26 +15,30 @@ void generate(int max,int nb,char *s) {
   if (nb==0) {
     s[len-1]=0;
     //    printf("%s\n",s);
-    node *root=build_tree(s,0);
-    char *enc = encode(root);
+    state_hydra *state;
+    state=build_hydra(s,0);
+    char *enc = encode_hydra(state);
     //    printf("%s\n",enc);
     int i;
     for (i=0;i<max_graph;i++)
       if (strcmp(acc[i],enc)==0) {
 	//	printf("%s is similar to another graph\n",s);
+	free(enc);
+	free_hydra(state);
 	break;
       }
     if (i==max_graph) {
-      char forest[1000];
-      res_hydra res;
-      forest[0]=0;
       acc[max_graph++]=enc;
-      tree_to_forest(root,forest);
-      hydra(root,&res);
-      if (res.success)
-	printf("%s solved in %ld\n",forest,res.step);
-      else
-	printf("%s could not be solved in %ld\n",forest,res.step);
+      char forest[1000];
+      forest[0]=0;
+      hydra_to_forest(state,forest);
+      hydra(state);
+      hydra_status res=get_status(state);
+      if (res==SUCCESS)
+	printf("%s solved in %ld\n",forest,get_steps(state));
+      else 
+	printf("%s could not be solved in %ld\n",forest,get_steps(state));
+      free_hydra(state);
     }
     return;
   }
