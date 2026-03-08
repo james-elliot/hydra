@@ -90,6 +90,7 @@ void nodes_to_forest(node *n,char *s) {
 }
 
 void hydra_to_forest(state_hydra *state, char *s) {
+  s[0]=0;
   nodes_to_forest(state->root,s);
 }
 
