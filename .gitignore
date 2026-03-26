@@ -2,4 +2,7 @@
 *.o
 main
 *.d
+*.aux
+*.log
+*.pdf
 

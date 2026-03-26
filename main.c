@@ -67,7 +67,7 @@ void generate(int max,int nb,char *s) {
 int main() {
   char s[2000];
   s[0]=0;
-  generate(1,5,s);
+  generate(1,4,s);
   int mini=0,ind=-1;
   for (int i=0;i<max_graph;i++) {
     if (nb_steps[i]>mini) {
@@ -76,7 +76,8 @@ int main() {
     }
   }
   if (ind!=-1) {
-    printf("best= %s %s %d\n", graphs[ind],forests[ind],nb_steps[ind]);
+    printf("max_steps= %d\n", nb_steps[ind]);
+    printf("%s\n", forests[ind]);
     state_hydra *state=build_hydra(graphs[ind],0);
     while (!one_step(state)) {
       hydra_to_forest(state,s);
